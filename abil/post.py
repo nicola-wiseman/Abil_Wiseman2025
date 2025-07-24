@@ -840,7 +840,7 @@ class post:
                 m = pickle.load(file)
             
             if return_all == True:
-                aoa, di_test, lpd_test, cutpoint = area_of_applicability(
+                aoa, di_test, lpd_test, cutpoint, test_to_train_d = area_of_applicability(
                     X_test=self.X_predict,
                     X_train=self.X_train,
                     y_train= self.y_train,
@@ -895,7 +895,7 @@ class post:
 
         # export aoa to netcdf:
         aoa_dataset.to_netcdf(os.path.join(self.path_out, "aoa.nc"), encoding=encoding)
-
+   
     def merge_env(self):
         """
         Merge model output with environmental data.

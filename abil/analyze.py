@@ -164,9 +164,9 @@ def area_of_applicability(
         lpd_test = numpy.empty_like(di_test) * numpy.nan
 
     aoa = di_test >= cutpoint
-
+    
     if return_all:
-        return aoa, di_test, lpd_test, cutpoint
+        return aoa, di_test, lpd_test, cutpoint, test_to_train_d
     else:
         return aoa, di_test
 

@@ -1,4 +1,5 @@
-scripts/singularity/
+dist/
+singularity/
 ModelOutput/
 plotting/
 /data/

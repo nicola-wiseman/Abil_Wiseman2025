@@ -861,7 +861,7 @@ class post:
                 }
                 
             elif return_all == False:
-                aoa, di_test = area_of_applicability(
+                aoa, di_test, cutpoint = area_of_applicability(
                     X_test=self.X_predict,
                     X_train=self.X_train,
                     y_train= self.y_train,
@@ -871,10 +871,12 @@ class post:
                 )
                 aoa_dataset[f"{target}_aoa"] = aoa
                 aoa_dataset[f"{target}_di"] = di_test
+                aoa_dataset[f"{target}_cutpoint"] = cutpoint
 
                 encoding = {
                     f"{target}_aoa": {"zlib": True, "complevel": 4, "dtype": "float32", "_FillValue": np.float32(np.nan)},
                     f"{target}_di": {"zlib": True, "complevel": 4, "dtype": "float64", "_FillValue": np.float64(np.nan)},
+                    f"{target}_cutpoint": {"zlib": True, "complevel": 4, "dtype": "float64", "_FillValue": np.float64(np.nan)}
                 }                
 
             else:

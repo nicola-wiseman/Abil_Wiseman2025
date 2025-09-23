@@ -80,7 +80,7 @@ def load_model_and_scores(path_out, ensemble_config, n, target):
     return(m, scores)
 
 
-def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_train, y_train, cv, model_out, n_threads=8):
+def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_train, y_train, cv, model_out, n_threads=8, random_state=None):
     """
     Exports model predictions to a NetCDF file.
 
@@ -105,7 +105,7 @@ def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_
     if (ensemble_config["classifier"] ==False) and (ensemble_config["regressor"] == True):
         with parallel_backend("loky", n_jobs=n_threads):
             d = pp.estimate_prediction_quantiles(
-                m, X_predict=X_predict, X_train=X_train, y_train=y_train, cv=cv
+                m, X_predict=X_predict, X_train=X_train, y_train=y_train, cv=cv, random_state=random_state
             )["predict_stats"]
             d['mean'] = m.predict(X_predict)
         
@@ -125,7 +125,7 @@ def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_
 
         with parallel_backend("loky", n_jobs=n_threads):
             d_both = pp.estimate_prediction_quantiles(
-                m, X_predict=X_predict, X_train=X_train, y_train=y_train, cv=cv, threshold=optimal_threshold
+                m, X_predict=X_predict, X_train=X_train, y_train=y_train, cv=cv, threshold=optimal_threshold, random_state=random_state
             )
             # Generate classifier and regressor stats
             d_clf = d_both['classifier_predict_stats']
@@ -264,12 +264,12 @@ class ModelPredictor:
             
         if model_config['stratify']==True:
             if model_config['upsample']==True:
-                self.cv = UpsampledZeroStratifiedKFold(n_splits=model_config['cv'])
+                self.cv = UpsampledZeroStratifiedKFold(n_splits=model_config['cv'], random_state= model_config['seed'])
                 logger.info("upsampling = True")
             else:
-                self.cv = ZeroStratifiedKFold(n_splits=model_config['cv'])
+                self.cv = ZeroStratifiedKFold(n_splits=model_config['cv'], random_state= model_config['seed'])
         else:
-            self.cv = KFold(n_splits=model_config['cv'])
+            self.cv = KFold(n_splits=model_config['cv'], shuffle=True, random_state= model_config['seed'])
 
         self.X_predict = X_predict
         X_predict = None
@@ -331,7 +331,7 @@ class ModelPredictor:
             model_name = self.ensemble_config["m" + str(1)]
             model_out = os.path.join(self.path_out, "predictions", model_name)
             export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                              model_out, n_threads=self.n_jobs)
+                              model_out, n_threads=self.n_jobs, random_state=self.seed)
 
         elif number_of_models >=2:
                     
@@ -347,11 +347,11 @@ class ModelPredictor:
 
                 if (self.ensemble_config["classifier"] ==False) and (self.ensemble_config["regressor"] == True):
                     export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                                    model_out, n_threads=self.n_jobs)
+                                    model_out, n_threads=self.n_jobs, random_state=self.seed)
                 if (self.ensemble_config["classifier"] ==True) and (self.ensemble_config["regressor"] == True):
 
                     export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                                     model_out, n_threads=self.n_jobs)
+                                     model_out, n_threads=self.n_jobs, random_state=self.seed)
 
                 models.append((model_name, m))
                 mae_values.append(mae)
@@ -361,7 +361,7 @@ class ModelPredictor:
                 m = VotingRegressor(estimators=models, weights=w).fit(self.X_train, self.y)   
                 model_out = os.path.join(self.path_out, "predictions", "ens")
                 export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                                model_out, n_threads=self.n_jobs)
+                                model_out, n_threads=self.n_jobs, random_state=self.seed)
                 
                 #export model object:
                 base_output_path = os.path.join(self.path_out, "model", "ens")
@@ -407,7 +407,7 @@ class ModelPredictor:
                 m.fit(self.X_train, y)
                 model_out = os.path.join(self.path_out, "predictions", "ens")
                 export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                                model_out, n_threads=self.n_jobs)
+                                model_out, n_threads=self.n_jobs, random_state=self.seed)
                 base_output_path = os.path.join(self.path_out, "model", "ens")
 
                 #make new dir if needed

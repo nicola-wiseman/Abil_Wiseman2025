@@ -9,6 +9,12 @@
 
 i=${SLURM_ARRAY_TASK_ID}
 
+# Define new (unique) temp dir
+JOB_TMP="/user/work/${USER}/.tmp/abil-${SLURM_JOB_ID:-$$}"
+mkdir -p "$JOB_TMP"
+export TMPDIR="$JOB_TMP"
+trap 'rm -rf "$JOB_TMP"' EXIT
+
 module  load apptainer/1.3.1  
 
 singularity exec \

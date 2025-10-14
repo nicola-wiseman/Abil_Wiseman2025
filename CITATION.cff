@@ -1,0 +1,19 @@
+cff-version: "1.2.0"
+authors:
+- family-names: de Vries
+  given-names: Joost
+  orcid: "https://orcid.org/0000-0003-3427-6921"
+- family-names: Wiseman
+  given-names: Nicola Ashlee
+  orcid: "https://orcid.org/0000-0001-9296-7566"
+- family-names: Wolf
+  given-names: Levi John
+  orcid: "https://orcid.org/0000-0003-0274-599X"
+contact:
+- family-names: de Vries
+  given-names: Joost
+  orcid: "https://orcid.org/0000-0003-3427-6921"
+doi: 10.5281/zenodo.16886567
+message: If you use this software, please cite our article in the
+  Journal of Open Source Software.
+title: "Abil: A Python package for the interpolation of aquatic biogeochemical datasets"

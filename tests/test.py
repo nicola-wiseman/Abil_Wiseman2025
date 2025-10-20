@@ -8,10 +8,10 @@ import pandas as pd
 import numpy as np
 import xarray as xr 
 
-from abil.tune import tune
+from abil.tune import ModelTuner as tune
 from abil.utils import example_data # example_training_data, example_predict_data
-from abil.predict import predict
-from abil.post import post
+from abil.predict import ModelPredictor as predict
+from abil.post import AbilPostProcessor as post
 
 class TestRegressors(unittest.TestCase):
 
@@ -66,7 +66,7 @@ class TestRegressors(unittest.TestCase):
         def do_post(statistic):
             m = post(self.X_train, self.y, self.X_predict, self.model_config, statistic, datatype="poc")
             #estimate aoa for each target and export to aoa.nc:
-            m.estimate_applicability()
+            m.estimate_applicability(drop_zeros=True)
 
             m.estimate_carbon("pg poc")
 
@@ -89,6 +89,19 @@ class TestRegressors(unittest.TestCase):
         do_post(statistic="ci95_LL")
 
 
+        integrated_total_poc_mean = pd.read_csv(
+            os.path.join("tests", "ModelOutput", "regressor", "posts", "integrated_totals", "ens_integrated_totals_mean_poc.csv")
+        )["total"].iat[0]
+        integrated_total_poc_ci95_UL = pd.read_csv(
+            os.path.join("tests", "ModelOutput", "regressor", "posts", "integrated_totals", "ens_integrated_totals_ci95_UL_poc.csv")
+        )["total"].iat[0]
+        integrated_total_poc_ci95_LL = pd.read_csv(
+            os.path.join("tests", "ModelOutput", "regressor", "posts", "integrated_totals", "ens_integrated_totals_ci95_LL_poc.csv")
+        )["total"].iat[0]
+
+        self.assertAlmostEqual(integrated_total_poc_mean, 1.013e17, delta=1e15)
+        self.assertAlmostEqual(integrated_total_poc_ci95_UL, 1.95e17, delta=1e15)
+        self.assertAlmostEqual(integrated_total_poc_ci95_LL, 2.46e16, delta=1e15)
 
 
 class Test2Phase(unittest.TestCase):
@@ -147,7 +160,7 @@ class Test2Phase(unittest.TestCase):
         def do_post(statistic):
             m = post(self.X_train, self.y, self.X_predict, self.model_config, statistic, datatype="poc")
             #estimate aoa for each target and export to aoa.nc:
-            m.estimate_applicability()
+            m.estimate_applicability(drop_zeros=True)
             m.estimate_carbon("pg poc")
             m.diversity()
 
@@ -166,10 +179,130 @@ class Test2Phase(unittest.TestCase):
         do_post(statistic="ci95_UL")
         do_post(statistic="ci95_LL")
 
+        integrated_total_poc_mean = pd.read_csv(
+            os.path.join("tests", "ModelOutput", "2-phase", "posts", "integrated_totals", "ens_integrated_totals_mean_poc.csv")
+        )["total"].iat[0]
+        integrated_total_poc_ci95_UL = pd.read_csv(
+            os.path.join("tests", "ModelOutput", "2-phase", "posts", "integrated_totals", "ens_integrated_totals_ci95_UL_poc.csv")
+        )["total"].iat[0]
+        integrated_total_poc_ci95_LL = pd.read_csv(
+            os.path.join("tests", "ModelOutput", "2-phase", "posts", "integrated_totals", "ens_integrated_totals_ci95_LL_poc.csv")
+        )["total"].iat[0]
+    
+        self.assertAlmostEqual(integrated_total_poc_mean, 2.55e17, delta=1e15)
+        self.assertAlmostEqual(integrated_total_poc_ci95_UL, 3.92e+17, delta=1e15)
+        self.assertAlmostEqual(integrated_total_poc_ci95_LL, 1.44e+17, delta=1e15)
+
+
+
+def _lat_band_area(lat_deg, dlat_deg):
+    """R^2 * (sin(phi+Δφ/2) - sin(phi-Δφ/2))  -> shape (nlat,)"""
+    phi = np.deg2rad(np.asarray(lat_deg))
+    dphi = np.deg2rad(float(dlat_deg))
+    return (6_371_000.0**2) * (np.sin(phi + dphi/2.0) - np.sin(phi - dphi/2.0))
+
+def _horiz_area_lat_lon(lat_deg, lon_deg, dlat_deg, dlon_deg):
+    """Per-cell horizontal area for (lat, lon): A_latband(lat) * Δλ  -> (nlat, nlon)"""
+    lat_band = _lat_band_area(lat_deg, dlat_deg)     # (nlat,)
+    dlam = np.deg2rad(float(dlon_deg))
+    lon_width = np.full(len(lon_deg), dlam)          # (nlon,)
+    return np.outer(lat_band, lon_width)             # (nlat, nlon)
+
+class _IntegrationParent:
+    """Minimal parent to satisfy the integration class."""
+    def __init__(self, ds: xr.Dataset):
+        self.d = ds.to_dataframe()
+        self.root = "."
+        self.model_config = {"path_out": ".", "run_name": "testrun"}
+        self.statistic = "stat"
+        self.datatype = ""
+
+class TestIntegrationFlexibleDims(unittest.TestCase):
+    """Checks known totals for multiple dimension combos."""
+
+    def setUp(self):
+        # tiny grid & constants
+        self.lat = np.array([-0.5, 0.5])       # 1° tall bands around equator
+        self.lon = np.array([0.0, 1.0, 2.0])   # 1° wide cells
+        self.depth = np.array([5.0, 15.0])     # two layers (indices only)
+        self.time = np.array([1, 2], dtype=int)  # integer months (Jan=1, Feb=2)
+        self.dlat = 1.0
+        self.dlon = 1.0
+        self.depth_w = 10.0  # m per depth cell
+        self.value = 2.0     # uniform field
+
+        # expected helpers
+        self.area2d = _horiz_area_lat_lon(self.lat, self.lon, self.dlat, self.dlon)
+        self.horiz_total = self.area2d.sum()
+        self.depth_total = self.depth_w * len(self.depth)
+        self.zonal_area_by_lat = (2.0 * np.pi) * _lat_band_area(self.lat, self.dlat)
+        self.zonal_total = self.zonal_area_by_lat.sum()
+
+    def _make_integration(self, ds, rate=False):
+        return post.integration(
+            parent=_IntegrationParent(ds),
+            resolution_lat=self.dlat,
+            resolution_lon=self.dlon,
+            depth_w=self.depth_w,
+            rate=rate
+        )
+
+    def test_lat_lon_depth_time(self):
+        coords = {"lat": self.lat, "lon": self.lon, "depth": self.depth, "time": self.time}
+        data = np.full((len(self.lat), len(self.lon), len(self.depth), len(self.time)), self.value)
+        ds = xr.Dataset({"foo": xr.DataArray(data, dims=("lat","lon","depth","time"), coords=coords)})
+
+        integ = self._make_integration(ds, rate=False)
+        total = integ.integrate_total(variable="foo", monthly=False)
+
+        expected = self.value * self.horiz_total * self.depth_total * len(self.time)
+        self.assertAlmostEqual(float(total.values), expected, places=10)
+
+    def test_lat_lon_only(self):
+        coords = {"lat": self.lat, "lon": self.lon}
+        data = np.full((len(self.lat), len(self.lon)), self.value)
+        ds = xr.Dataset({"foo": xr.DataArray(data, dims=("lat","lon"), coords=coords)})
+
+        integ = self._make_integration(ds, rate=False)
+        total = integ.integrate_total(variable="foo", monthly=False)
+
+        expected = self.value * self.horiz_total
+        self.assertAlmostEqual(float(total.values), expected, places=10)
+
+    def test_lat_depth_only(self):
+        coords = {"lat": self.lat, "depth": self.depth}
+        data = np.full((len(self.lat), len(self.depth)), self.value)
+        ds = xr.Dataset({"foo": xr.DataArray(data, dims=("lat","depth"), coords=coords)})
+
+        integ = self._make_integration(ds, rate=False)
+        total = integ.integrate_total(variable="foo", monthly=False)
+
+        expected = self.value * self.zonal_total * self.depth_total
+        self.assertAlmostEqual(float(total.values), expected, places=10)
+
+    def test_time_only(self):
+        coords = {"time": self.time}
+        data = np.full((len(self.time),), self.value)
+        ds = xr.Dataset({"foo": xr.DataArray(data, dims=("time",), coords=coords)})
+
+        integ = self._make_integration(ds, rate=False)
+        total = integ.integrate_total(variable="foo", monthly=False)
+
+        expected = self.value * len(self.time)  # volume=1, just sum over time
+        self.assertAlmostEqual(float(total.values), expected, places=10)
+
+
 if __name__ == '__main__':
     # Create a test suite combining all test cases in order
     suite = unittest.TestSuite()
     suite.addTest(TestRegressors('test_post_ensemble'))
     suite.addTest(Test2Phase('test_post_ensemble'))
+
+    # post area integration tests
+    suite.addTest(TestIntegrationFlexibleDims('test_lat_lon_depth_time'))
+    suite.addTest(TestIntegrationFlexibleDims('test_lat_lon_only'))
+    suite.addTest(TestIntegrationFlexibleDims('test_lat_depth_only'))
+    suite.addTest(TestIntegrationFlexibleDims('test_time_only'))
+
     runner = unittest.TextTestRunner()
     runner.run(suite)

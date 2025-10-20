@@ -9,11 +9,17 @@
 
 i=${SLURM_ARRAY_TASK_ID}
 
-module  load apptainer/1.3.1  
+# Define new (unique) temp dir
+JOB_TMP="/user/work/${USER}/.tmp/abil-${SLURM_JOB_ID:-$$}"
+mkdir -p "$JOB_TMP"
+export TMPDIR="$JOB_TMP"
+trap 'rm -rf "$JOB_TMP"' EXIT
+
+module  load apptainer/1.3.1
 
 singularity exec \
 -B/user/work/$(whoami):/user/work/$(whoami) \
 /user/work/$(whoami)/Abil/singularity/abil.sif \
-python /user/work/$(whoami)/Abil/hpc_tune.py ${SLURM_CPUS_PER_TASK} ${i} "rf"
+python /user/work/$(whoami)/Abil/hpc_tune.py ${SLURM_CPUS_PER_TASK} ${i} "xgb"
 
 export SINGULARITY_CACHEDIR=/user/work/$(whoami)/.singularity

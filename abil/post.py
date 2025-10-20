@@ -4,13 +4,16 @@ import glob, os
 import xarray as xr
 import pickle
 import gc
+import logging
 from yaml import dump, Dumper
 from skbio.diversity.alpha import shannon
 
 
 from .analyze import area_of_applicability
 
-class post:
+logger = logging.getLogger("abil")
+
+class AbilPostProcessor:
     """
     Post processing of SDM
     """
@@ -76,7 +79,7 @@ class post:
 
             This function uses `xarray.open_mfdataset` to load all NetCDF files in the given directory 
             (matching the pattern "*.nc") and combines them into one xarray.Dataset. The function 
-            prints status messages indicating the start and completion of the merging process.
+            logs status messages indicating the start and completion of the merging process.
 
             Parameters
             ----------
@@ -91,8 +94,7 @@ class post:
                 The merged dataset containing the combined data from all the NetCDF files in the directory.
                 The variable names in the merged dataset are derived from the 'target' values in each file.
             """
-            print("merging...")
-            print(path_in)
+            logger.info(f"merging... {path_in}")
 
             datasets = []
             
@@ -107,12 +109,12 @@ class post:
                         ds_subset = ds[[statistic]].rename({statistic: target_name})
                         datasets.append(ds_subset)
                     else:
-                        print(f"Statistic '{statistic}' not found in {file}")
+                        logger.info(f"Statistic '{statistic}' not found in {file}")
 
             # Merge datasets by variables, keeping same coordinates
             merged_ds = xr.merge(datasets, compat='override')  # 'override' skips conflicts
 
-            print("finished merging NetCDF files")
+            logger.info("finished merging NetCDF files")
             return merged_ds
 
         self.path_out = os.path.join(model_config['root'], model_config['path_out'], model_config['run_name'], "posts/")
@@ -162,7 +164,7 @@ class post:
         ------
         Exception
             If an error occurs during the directory creation or file writing process, an exception
-            is caught and an error message is printed.
+            is caught and an error message is logger.info(ed.
 
         Notes
         -----
@@ -176,9 +178,9 @@ class post:
             with open(yml_file_path, 'w') as yml_file:
                 dump(self.model_config, yml_file, Dumper=Dumper, default_flow_style=False)
             
-            print(f"Model configuration exported to: {yml_file_path}")
+            logger.info(f"Model configuration exported to: {yml_file_path}")
         except Exception as e:
-            print(f"Error exporting model_config to YAML: {e}")   
+            logger.info(f"Error exporting model_config to YAML: {e}")   
 
     def merge_performance(self):
         """
@@ -191,8 +193,7 @@ class post:
         """    
 
         models = [value for key, value in self.model_config['ensemble_config'].items() if key.startswith("m")]
-        print("models included in merge performance!")
-        print(models)
+        logger.info(f"models included in merge performance! {models}")
         models.append("ens")
         for model in models:
             self.merge_performance_single_model(model)
@@ -256,13 +257,11 @@ class post:
                 all_performance.append(performance)
 
         all_performance = pd.concat(all_performance)
-        try: #make new dir if needed
-            os.makedirs(os.path.join(self.root, self.model_config['path_out'], self.model_config['run_name'], "posts/performance"))
-        except:
-            None
+        #make new dir if needed
+        os.makedirs(os.path.join(self.root, self.model_config['path_out'], self.model_config['run_name'], "posts/performance"), exist_ok=True)
         all_performance.to_csv(os.path.join(self.root, self.model_config['path_out'], self.model_config['run_name'], "posts/performance", model) + "_performance.csv", index=False)
 
-        print("finished merging performance")
+        logger.info("finished merging performance")
 
     def merge_parameters(self):
         """
@@ -316,8 +315,7 @@ class post:
         for i in range(len(self.unique_targets)):
             
             target = self.unique_targets[i]
-            print("the target is:")
-            print(target)
+            logger.info(f"the target is: {target}")
             target_no_space = target.replace(' ', '_')
 
             with open(os.path.join(self.root, self.model_config['path_out'], self.model_config['run_name'], "model", model, target_no_space) + self.extension, 'rb') as file:
@@ -441,14 +439,12 @@ class post:
                     all_parameters.append(parameters) 
 
         all_parameters= pd.concat(all_parameters)
-        try: #make new dir if needed
-            os.makedirs(os.path.join(self.root, self.model_config['path_out'], self.model_config['run_name'], "posts/parameters"))
-        except:
-            None
+        #make new dir if needed
+        os.makedirs(os.path.join(self.root, self.model_config['path_out'], self.model_config['run_name'], "posts/parameters"), exist_ok=True)
         all_parameters.to_csv(os.path.join(self.root, self.model_config['path_out'], self.model_config['run_name'], "posts/parameters", model) + "_parameters.csv", index=False)
 
         
-        print("finished merging parameters")
+        logger.info("finished merging parameters")
 
     def estimate_carbon(self, variable):
 
@@ -468,9 +464,9 @@ class post:
 
         w = self.traits.query('Target in @self.targets')
         var = w[variable].to_numpy()
-        print(var)
+        logger.info(f"{variable} values:\n\t{var}")
         self.d = self.d.apply(lambda row : (row[self.targets]* var), axis = 1)
-        print("finished estimating " + variable)
+        logger.info(f"{variable} finished estimating.")
 
     def def_groups(self, dict):
         """
@@ -493,7 +489,7 @@ class post:
         df = (df.rename(columns=dict)
             .groupby(level=0, axis=1, dropna=False)).sum( min_count=1)
         self.d = pd.concat([self.d, df], axis=1)
-        print("finished defining groups")
+        logger.info("finished defining groups")
 
     def cwm(self, variable):
         """
@@ -511,14 +507,14 @@ class post:
         var = w[variable].to_numpy()
         var_name = 'cwm ' + variable
         self.d[var_name] = self.d.apply(lambda row : np.average(var, weights=row[self.targets]), axis = 1)
-        print("finished calculating CWM " + variable)
+        logger.info(f"finished calculating CWM {variable}")
 
     def diversity(self):
         """
         Estimates Shannon diversity using scikit-bio.
         """
         self.d['shannon'] = self.d.apply(shannon, axis=1)
-        print("finished calculating shannon diversity")
+        logger.info("finished calculating shannon diversity")
 
     def total(self):
         """
@@ -533,7 +529,7 @@ class post:
 
         self.d['total'] = self.d[self.targets].sum( axis='columns')
         self.d['total_log'] = np.log(self.d['total'])
-        print("finished calculating total")
+        logger.info("finished calculating total")
 
     def process_resampled_runs(self):
         """
@@ -549,15 +545,15 @@ class post:
         """
 
         self.d['mean'] = self.d[self.targets].mean(axis='columns')
-        print('finished calculating mean')
+        logger.info('finished calculating mean')
     
         self.d['stdev'] = self.d[self.targets].std(axis='columns')
-        print('finished calculating standard deviation')
+        logger.info('finished calculating standard deviation')
 
         self.d['prctile_2.5'] = self.d[self.targets].quantile(0.025, axis='columns')
         self.d['prctile_97.5'] = self.d[self.targets].quantile(0.975, axis='columns')
 
-        print('finished calculating 2.5th and 97.5th percentiles')
+        logger.info('finished calculating 2.5th and 97.5th percentiles')
 
     def integration(self, *args, **kwargs):
         return self.integration_class(self, *args, **kwargs)
@@ -606,57 +602,76 @@ class post:
             """
             Calculate the volume for each cell and add it as a new field to the dataset.
 
+            Works with any subset of ('lat','lon','depth'). If only 'lat' is present,
+            uses the zonal band area (integrated over all longitudes).
+
             Examples
             --------
-            >>> m = post(model_config)
+            >>> m = AbilPostProcessor(model_config)
             >>> int = m.Integration(m, resolution_lat=1.0, resolution_lon=1.0, depth_w=5, vol_conversion=1, magnitude_conversion=1e-21, molar_mass=12.01, rate=True)
             >>> print("Volume calculated:", int.ds['volume'].values)
-
             """            
             ds = self.parent.d.to_xarray()
-            resolution_lat = self.resolution_lat
-            resolution_lon = self.resolution_lon
-            depth_w = self.depth_w
-
-            # Calculate the number of cells in latitude and longitude
-            num_cells_lat = int(ds['lat'].size / resolution_lat)
-            num_cells_lon = int(ds['lon'].size / resolution_lon)
-
-            # Retrieve initial latitude and longitude bound
-            min_lat = ds['lat'].values[0]
-            min_lon = ds['lon'].values[0]
-
-            # Initialize the 2D array to store the areas
-            area = np.zeros((num_cells_lat, num_cells_lon))
+            resolution_lat = float(self.resolution_lat)
+            resolution_lon = float(self.resolution_lon)
+            depth_w = float(self.depth_w)
 
             earth_radius = 6371000.0  # Earth's radius in meters
 
-            # Calculate the area of each cell
-            for lat_index in range(num_cells_lat):
-                for lon_index in range(num_cells_lon):
-                    # Calculate the latitude range of the cell
-                    lat_bottom = min_lat + lat_index * resolution_lat
-                    lat_top = lat_bottom + resolution_lat
+            # area factor (lat/lon)
+            has_lat = ('lat' in ds.dims or 'lat' in ds.coords)
+            has_lon = ('lon' in ds.dims or 'lon' in ds.coords)
 
-                    # Calculate the longitude range of the cell
-                    lon_left = min_lon + lon_index * resolution_lon
-                    lon_right = lon_left + resolution_lon
+            if has_lat and has_lon:
+                # lat & lon present: per-cell horizontal area using uniform resolutions
+                lat = ds['lat'].values
+                lon = ds['lon'].values
 
-                    # Calculate the area of the grid cell
-                    areas = earth_radius ** 2 * (np.sin(np.radians(lat_top)) - np.sin(np.radians(lat_bottom))) * \
-                            (np.radians(lon_right) - np.radians(lon_left))
+                dphi = np.deg2rad(resolution_lat)
+                dlambda = np.deg2rad(resolution_lon)
 
-                    # Store the area in the array
-                    area[lat_index, lon_index] = areas
+                # vectorized latitude band contribution
+                phi = np.deg2rad(lat)
+                lat_band = (earth_radius ** 2) * (np.sin(phi + dphi / 2.0) - np.sin(phi - dphi / 2.0))  # (lat,)
 
-            volume = area * depth_w
-            ds['volume'] = (('lat', 'lon'), volume)
+                # longitude width (same for all longitudes for a given Δλ)
+                lon_width = np.full(lon.shape, dlambda)  # (lon,)
+
+                # outer product -> (lat, lon)
+                area = np.outer(lat_band, lon_width)
+                area_da = xr.DataArray(area, dims=('lat', 'lon'))
+
+            elif has_lat and not has_lon:
+                # lat only: use full 2π longitude span (zonal band area per latitude cell)
+                lat = ds['lat'].values
+                dphi = np.deg2rad(resolution_lat)
+                phi = np.deg2rad(lat)
+                # A_band = R^2 * (sin(phi+Δ/2) - sin(phi-Δ/2)) * 2π
+                area_band = (earth_radius ** 2) * (np.sin(phi + dphi / 2.0) - np.sin(phi - dphi / 2.0)) * (2.0 * np.pi)
+                area_da = xr.DataArray(area_band, dims=('lat',))
+            else:
+                # no horizontal dimensions -> multiply by 1
+                area_da = xr.DataArray(1.0)
+
+            # depth factor
+            if 'depth' in ds.dims or 'depth' in ds.coords:
+                nz = ds.sizes.get('depth', len(ds['depth']))
+                dz_da = xr.DataArray(np.full((nz,), depth_w), dims=('depth',))
+            else:
+                dz_da = xr.DataArray(1.0)
+
+            # estimate volume
+            volume = area_da * dz_da
+            volume.name = 'volume'
+            ds['volume'] = volume
             self.parent.d = ds.to_dataframe()
-        
+
         def integrate_total(self, variable='total', monthly=False, subset_depth=None):
             """
             Estimates global integrated values for a single target. Returns the depth integrated annual total.
             
+            Works with any subset/ordering of ('lat','lon','depth','time').
+
             Parameters
             ----------
             variable : str
@@ -664,18 +679,18 @@ class post:
 
             monthly : bool
                 Whether or not to calculate a monthly average value instead of an annual total. Default is False.
- 
+
             subset_depth : float
                 Depth in meters from surface to which integral should be calculated. Default is None. Ex. 100 for top 100m integral.
 
             Examples
             --------
-            >>> m = post(model_config)
+            >>> m = AbilPostProcessor(model_config)
             >>> int = m.Integration(m, resolution_lat=1.0, resolution_lon=1.0, depth_w=5, vol_conversion=1, magnitude_conversion=1e-21, molar_mass=12.01, rate=True)
             >>> result = integration.integrate_total(variable='Calcification')
             >>> print("Final integrated total:", result.values)
             """
-            print("Initiate integrated_total")
+            logger.info("Initiate integrated_total")
             ds = self.parent.d.to_xarray()
             vol_conversion = self.vol_conversion
             magnitude_conversion = self.magnitude_conversion
@@ -685,55 +700,76 @@ class post:
             # Average number of days for each month (accounting for leap years)
             days_per_month_full = np.array([31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
             
-            # Get the available time points (months) from the dataset
-            available_time = ds['time'].values  # Assuming 'time' is an array of 1, 2, 3, and 12
+            if variable not in ds:
+                raise KeyError(f"Variable '{variable}' not found in dataset.")
 
-            # Subset the days_per_month array to only include the available months
-            days_per_month = days_per_month_full[available_time - 1]
-
-            if subset_depth:
+            # Optional depth subset if depth exists
+            if subset_depth is not None and ('depth' in ds.dims or 'depth' in ds.coords):
                 ds = ds.sel(depth=slice(0, subset_depth))
 
-            if rate:
+            var = ds[variable]
+            vol = ds['volume']
+
+            # Ensure volume is broadcastable to var
+            vol = vol.broadcast_like(var)
+
+            has_time = ('time' in var.dims)
+
+            # If time exists, map each time step to a month index 1..12
+            if has_time:
+                available_time = ds['time'].values
+                if np.issubdtype(available_time.dtype, np.datetime64):
+                    months_idx = pd.to_datetime(available_time).month.astype(int)
+                else:
+                    months_idx = available_time.astype(int)
+                days_per_month = days_per_month_full[months_idx - 1]
+
+            if rate and has_time:
                 if monthly:
-                    # Calculate monthly total (separately for each month)
+                    # Calculate monthly total (separately for each time step) with month-day weighting
                     total = []
-                    for i,month in enumerate(available_time):
-                        monthly_total = (ds[variable].isel(time=i) * ds['volume'].isel(time=i) * days_per_month[i]).sum(dim=['lat', 'lon', 'depth'])
+                    for i in range(var.sizes['time']):
+                        vol_i = vol.isel(time=i) if ('time' in vol.dims) else vol
+                        monthly_total = (var.isel(time=i) * vol_i * days_per_month[i]).sum(
+                            dim=[d for d in var.dims if d != 'time']
+                        )
                         monthly_total = (monthly_total * molar_mass) * vol_conversion * magnitude_conversion
                         total.append(monthly_total)
                     total = xr.concat(total, dim="month")
-                    print(f"All monthly totals: {total.values}")
+                    logger.info(f"All monthly totals: {total.values}")
                 else:
-                    # Calculate annual total
-                    total = (ds[variable] * ds['volume'] * days_per_month.mean()).sum(dim=['lat', 'lon', 'depth', 'time'])
+                    # Annual total with month-day weighting
+                    weight = xr.DataArray(days_per_month, dims=('time',))
+                    total = (var * vol * weight).sum(dim=list(var.dims))
                     total = (total * molar_mass) * vol_conversion * magnitude_conversion
-                    print("Final integrated total:", total.values)
+                    logger.info(f"Final integrated total: {total.values}")
             else:
-                if monthly:
-                    # Calculate monthly total (separately for each month)
+                if monthly and has_time:
+                    # Monthly totals without rate weighting
                     total = []
-                    for i,month in enumerate(available_time):
-                        monthly_total = (ds[variable].isel(time=i) * ds['volume']).isel(time=i).sum(dim=['lat', 'lon', 'depth'])
+                    for i in range(var.sizes['time']):
+                        vol_i = vol.isel(time=i) if ('time' in vol.dims) else vol
+                        monthly_total = (var.isel(time=i) * vol_i).sum(
+                            dim=[d for d in var.dims if d != 'time']
+                        )
                         monthly_total = (monthly_total * molar_mass) * vol_conversion * magnitude_conversion
                         total.append(monthly_total)
                     total = xr.concat(total, dim="month")
-                    print(f"All monthly totals: {total.values}")
+                    logger.info(f"All monthly totals: {total.values}")
                 else:
-                    # Calculate annual total
-                    total = (ds[variable] * ds['volume']).sum(dim=['lat', 'lon', 'depth', 'time'])
+                    # Integrate over whatever dims exist
+                    total = (var * vol).sum(dim=list(var.dims))
                     total = (total * molar_mass) * vol_conversion * magnitude_conversion
-                    print("Final integrated total:", total.values)
+                    logger.info(f"Final integrated total: {total.values}")
             return total
 
-
         def integrated_totals(self, targets=None, monthly=False, subset_depth=None, 
-                             export=True, model="ens"):
+                         export=True, model="ens"):
             """
             Estimates global integrated values for all targets.
-    
+
             Considers latitude and depth bin size.
-    
+
             Parameters
             ----------
             targets : an np.array of str, optional
@@ -742,7 +778,7 @@ class post:
 
             monthly : bool
                 Whether or not to calculate a monthly average value instead of an annual total. Default is False.
- 
+
             subset_depth : float
                 Depth in meters from surface to which integral should be calculated. Default is None. Ex. 100 for top 100m integral.
 
@@ -751,7 +787,6 @@ class post:
 
             model : str
                 The model version to be integrated. Default is "ens". Other options include {"rf", "xgb", "knn"}.
-    
             """
             ds = self.parent.d.to_xarray()
             if targets is None:
@@ -770,22 +805,21 @@ class post:
 
             for target in targets:
                 try:
-                    print(f"Processing target: {target}")
+                    logger.info(f"Processing target: {target}")
                     total = self.integrate_total(variable=target, monthly=monthly, subset_depth=subset_depth)
                     total_df = pd.DataFrame({'total': [total.values], 'variable': target})
                     totals.append(total_df)
                 except Exception as e:
-                    print(f"Some targets do not have predictions! Missing: {target}")
-                    print(f"Error: {e}")
+                    logger.info(f"Some targets do not have predictions! Missing: {target}")
+                    logger.info(f"Error: {e}")
             totals = pd.concat(totals)
 
             if export:
                 depth_str = f"_depth_{subset_depth}m" if subset_depth else ""
                 month_str = "_monthly_int" if monthly else ""
-                try: #make new dir if needed
-                    os.makedirs(os.path.join(self.parent.root, self.parent.model_config['path_out'], self.parent.model_config['run_name'], "posts/integrated_totals"))
-                except:
-                    None
+                #make new dir if needed
+                os.makedirs(os.path.join(self.parent.root, self.parent.model_config['path_out'], self.parent.model_config['run_name'], "posts/integrated_totals"), exist_ok=True)
+
 
                 path_out = self.parent.model_config['path_out']
                 run_name = self.parent.model_config['run_name']
@@ -801,16 +835,15 @@ class post:
                 # Write to CSV
                 totals.to_csv(file_path, index=False)
 
-                print(f"Exported totals")
+                logger.info(f"Exported totals")
 
-    def estimate_applicability(self, targets=None, threshold='tukey', return_all=False):
+
+    def estimate_applicability(self, targets=None, threshold='tukey', return_all=False, drop_zeros=False):
         """
         Estimate the area of applicability for the data using a strategy similar to Meyer & Pebesma 2022).
-
         This calculates the importance-weighted feature distances from test to train points,
         and then defines the "applicable" test sites as those closer than some threshold
         distance.
-
         A value of 0 indicates the point is within the Area of Applicability, 
         while a value of 1 indicates the point is outside the Area of Applicability.
         Note: if using pseudo-absences in y_train and  X_train, mask out where y_train = 0 to calculate
@@ -821,7 +854,9 @@ class post:
         targets : an np.array of str, optional
             An np.array of target variable names to include in the merge. If None, the default 
             targets from `self.targets` are used (default is None).
-
+        drop_zeros : bool, optional
+            Wether or not to exclude rows where y_train values are equal to 0.
+            (default is False)
         """
         if targets is None:
             targets = self.targets
@@ -831,19 +866,32 @@ class post:
 
         # estimate the aoa for each target:
         for i in range(len(targets)):
-            
+
             target = targets[i]
             target_no_space = target.replace(' ', '_')
 
             # load the voting regressor model object for each target:
             with open(os.path.join(self.root, self.model_config['path_out'], self.model_config['run_name'], "model", "ens", target_no_space) + self.extension, 'rb') as file:
                 m = pickle.load(file)
-            
-            if return_all == True:
+
+            if drop_zeros:
+                if isinstance(self.y_train, pd.Series):
+                    y_train = self.y_train.where(self.y_train > 0)
+                else:
+                    y_train = self.y_train.copy()
+                    y_train.loc[y_train[target] <= 0, target] = np.nan
+                    y_train = y_train[target]
+            else:
+                if isinstance(self.y_train, pd.Series):
+                    y_train = self.y_train
+                else:
+                    y_train = self.y_train[target]
+
+            if return_all is True:
                 aoa, di_test, lpd_test, cutpoint, test_to_train_d = area_of_applicability(
                     X_test=self.X_predict,
                     X_train=self.X_train,
-                    y_train= self.y_train,
+                    y_train= y_train,
                     model=m,
                     threshold=threshold,
                     return_all=return_all
@@ -864,7 +912,7 @@ class post:
                 aoa, di_test, cutpoint = area_of_applicability(
                     X_test=self.X_predict,
                     X_train=self.X_train,
-                    y_train= self.y_train,
+                    y_train= y_train,
                     model=m,
                     threshold=threshold,
                     return_all=return_all
@@ -880,7 +928,7 @@ class post:
                 }                
 
             else:
-                print("return_all requires a boolean input")
+                raise ValueError(f"return_all requires a boolean input, but recieved {return_all}")
 
         # convert df to xarray ds:
         aoa_dataset = aoa_dataset.to_xarray()
@@ -897,14 +945,12 @@ class post:
 
         # export aoa to netcdf:
         aoa_dataset.to_netcdf(os.path.join(self.path_out, "aoa.nc"), encoding=encoding)
-   
+
     def merge_env(self):
         """
         Merge model output with environmental data.
-
         This method aligns and merges the predicted values (model output) with the existing 
         environmental dataset stored in `self.d`. The merged data replaces `self.d`.
-
         Returns
         -------
         None
@@ -918,7 +964,7 @@ class post:
             ds['FID'] = ds['FID'].where(ds['FID'] != '', np.nan)
         self.d = ds.to_dataframe()
         self.d = self.d.dropna()
-
+        
     def export_ds(self, file_name, 
                   author=None, description=None):
         """
@@ -945,14 +991,12 @@ class post:
         - The file is saved with a suffix that includes the `pi` value (e.g., `_PI50.nc`).
         """
     
-        try: #make new dir if needed
-            os.makedirs(self.path_out)
-        except:
-            None
+        #make new dir if needed
+        os.makedirs(self.path_out, exist_ok=True)
 
-        print("export_ds")
-        print("dataframe: ")
-        print(self.d.head())
+
+        logger.info("export_ds")
+        logger.info(f"dataframe: {self.d.head()}")
         ds = self.d.to_xarray()
 
         if description is not None:
@@ -963,24 +1007,24 @@ class post:
         try:
             ds['lat'].attrs['units'] = 'degrees_north'
             ds['lat'].attrs['long_name'] = 'latitude'
-        except:
+        except KeyError:
             pass
         try:
             ds['lon'].attrs['units'] = 'degrees_east'
             ds['lon'].attrs['long_name'] = 'longitude'
-        except:
+        except KeyError:
             pass
         try:
             ds['depth'].attrs['units'] = 'm'
             ds['depth'].attrs['positive'] = 'down'
-        except:
+        except KeyError:
             pass
-        #to add loop defining units of variables
+        # TODO: to add loop defining units of variables
 
-        print(self.d.head())
-        ds.to_netcdf(os.path.join(self.path_out, file_name) + "_" + self.statistic + self.datatype + ".nc")
-
-        print("exported ds to: " + self.path_out + file_name + "_" + self.statistic + self.datatype +  ".nc")
+        logger.info(self.d.head())
+        fname = os.path.join(self.path_out, file_name) + "_" + self.statistic + self.datatype + ".nc"
+        ds.to_netcdf(fname)
+        logger.info(f"exported ds to: {fname}")
         #add nice metadata
 
 
@@ -1003,17 +1047,15 @@ class post:
         - The file is saved with a suffix that includes the `pi` value (e.g., `_PI50.nc`).
         """
     
-        try: #make new dir if needed
-            os.makedirs(self.path_out)
-        except:
-            None
+        os.makedirs(self.path_out, exist_ok=True)
     
-        print(self.d.head())
-        self.d.to_csv(os.path.join(self.path_out, file_name) + "_" + self.statistic + self.datatype + ".csv")
+        logger.info(self.d.head())
+        fname = os.path.join(self.path_out, file_name) + "_" + self.statistic + self.datatype + ".csv"
+        self.d.to_csv(fname)
 
-        print("exported d to: " + self.path_out + file_name + "_" + self.statistic + self.datatype + ".csv")
+        logger.info(f"exported d to: {fname}")
 
-    def merge_obs(self, file_name, targets=None):
+    def merge_obs(self, file_name, targets=None, index_cols=['lat', 'lon', 'depth', 'time']):
         """
         Merge model output with observational data and calculate residuals.
 
@@ -1027,11 +1069,13 @@ class post:
         targets : an np.array of str, optional
             An np.array of target variable names to include in the merge. If None, the default 
             targets from `self.targets` are used (default is None).
+        index_cols : an np.array of str, optional
+            A list of indices which denote the data dimensions. (default is ['lat', 'lon', 'depth', 'time'])
 
         Notes
         -----
         - The function matches the observational data with model predictions based on the 
-        indices `['lat', 'lon', 'depth', 'time']`.
+        index_cols which default to `['lat', 'lon', 'depth', 'time']`.
         - Residuals are calculated as `observed - predicted` for each target variable.
         - Columns included in the output are the original targets, their modeled values 
         (suffixed with `_mod`), and their residuals (suffixed with `_resid`).
@@ -1052,7 +1096,7 @@ class post:
         mod_columns = {target: target + '_mod' for target in targets}
         d = d.rename(mod_columns, axis=1)
         d.reset_index(inplace=True)
-        d.set_index(['lat', 'lon', 'depth', 'time'], inplace=True)        
+        d.set_index(index_cols, inplace=True)        
 
         # Read the training targets from the training.csv file defined in model_config
         try:
@@ -1063,7 +1107,7 @@ class post:
             raise FileNotFoundError(f"Dataset not found at {df2_path}")
         
 
-        df2.set_index(['lat', 'lon', 'depth', 'time'], inplace=True)
+        df2.set_index(index_cols, inplace=True)
         df2['dummy'] = 1
 
         out = pd.concat([df2, d], axis=1)
@@ -1078,9 +1122,10 @@ class post:
 
         out = out[keep_columns]
         file_name = f"{file_name}_obs"
-        print(out.head())
-        out.to_csv(os.path.join(self.path_out, file_name)  + self.datatype +  ".csv")
+        logger.info(out.head())
+        fname = os.path.join(self.path_out, file_name)  + self.datatype +  ".csv"
+        out.to_csv(fname)
 
-        print("exported d to: " + self.path_out + file_name  + self.datatype + ".csv")
+        logger.info(f"exported d to: {fname}")
 
-        print('training merged with predictions')
+        logger.info('training merged with predictions')

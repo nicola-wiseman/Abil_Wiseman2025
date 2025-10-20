@@ -78,15 +78,39 @@ def area_of_applicability(
     """
     if feature_weight_kwargs is None:
         feature_weight_kwargs = dict()
+    
+    base.check_array(X_test, force_all_finite='allow-nan')
+    base.check_array(X_train, force_all_finite='allow-nan')
 
-    base.check_array(X_test)
-    base.check_array(X_train)
+    mask_test = numpy.asarray(~numpy.isnan(X_test).any(axis=1))
+    mask_train = numpy.asarray(~numpy.isnan(X_train).any(axis=1))
+    
+    if y_train is not None:
+        mask_train *= (~numpy.isnan(numpy.asarray(y_train)))
 
     n_test, n_features = X_test.shape
     n_train, _ = X_train.shape
-    assert n_features == X_train.shape[1], (
+
+    if n_features != X_train.shape[1]:
+        raise ValueError(
         "features must be the same for both training and test data."
     )
+
+    if mask_test.sum() <= 2:
+        raise ValueError("at least two test samples must be not nan")
+    if mask_train.sum() <= 2:
+        raise ValueError("at least two train samples must be not nan")
+
+    aoa_ = numpy.empty((n_test, ))
+    di_test_ = numpy.empty((n_test, ))
+    lpd_test_ = numpy.empty((n_test, ))
+
+    if return_all:
+        lpd_test_ = numpy.empty((n_test, ))
+        test_to_train_d_ = numpy.empty((n_test, n_train))
+
+    X_train = X_train[mask_train]
+    y_train = y_train[mask_train]
 
     if not feature_weights:
         feature_weights = numpy.ones(n_features)
@@ -102,7 +126,8 @@ def area_of_applicability(
         ).importances_mean
         feature_weights /= feature_weights.sum()
     else:
-        assert len(feature_weights) == n_features, (
+        if len(feature_weights) != n_features:
+            raise ValueError(
             "weights must be provided for all features"
         )
         feature_weights = feature_weights / sum(feature_weights)
@@ -143,10 +168,27 @@ def area_of_applicability(
 
     if return_all:
         test_to_train_d = metrics.pairwise_distances(
-            X_test * feature_weights[None, :],
+            X_test[mask_test] * feature_weights[None, :],
+            # NOTE: X_train is already filtered from the previous step!
             X_train * feature_weights[None, :],
             metric=metric,
-        )
+        )  
+
+        # NOTE: This is gross, but I don't see how to work around this. 
+        # I tried doing something along the lines of: 
+        # ```{python}
+        # test_to_train_d_[
+        #     mask_test.reshape(-1,1)*mask_test.reshape(1,-1)
+        # ] = test_to_train_d
+        # ```
+        # but you can't assign a 2d matrix *into* a 2d selection. 
+        test_to_train_d_[:] = numpy.nan
+        i_in_full = 0
+        for i, is_null in enumerate(mask_test):
+            if not is_null:
+                test_to_train_d_[i, mask_train] = test_to_train_d[i_in_full]
+                i_in_full+=1
+
         test_to_train_d_min = test_to_train_d.min(axis=1)
         test_to_train_i = test_to_train_d.argmin(axis=1)
 
@@ -156,7 +198,8 @@ def area_of_applicability(
     else:
         # if we don't need local point density, this can be used
         test_to_train_i, test_to_train_d_min = metrics.pairwise_distances_argmin_min(
-            X_test * feature_weights[None, :],
+            X_test[mask_test] * feature_weights[None, :],
+            # NOTE: X_train is already filtered from the previous step!
             X_train * feature_weights[None, :],
             metric=metric,
         )
@@ -164,9 +207,14 @@ def area_of_applicability(
         lpd_test = numpy.empty_like(di_test) * numpy.nan
 
     aoa = di_test >= cutpoint
+
+    lpd_test_[mask_test] = lpd_test
+    di_test_[mask_test] = di_test
+    aoa_[mask_test] = aoa
+    lpd_test_[~mask_test] = di_test_[~mask_test] = aoa_[~mask_test] = numpy.nan
     
     if return_all:
-        return aoa, di_test, lpd_test, cutpoint, test_to_train_d
+        return aoa_, di_test_, lpd_test_, cutpoint, test_to_train_d_
     else:
         return aoa, di_test, cutpoint
 
@@ -221,4 +269,26 @@ if __name__ == "__main__":
         model=model,
         cv=reg.cv
     )
+    ynan_train = y_train.copy()
+    train_nans = X_train.sample(frac=.2).sample(frac=.2, axis=1)
+    Xnan_train = X_train.copy()
+    Xnan_train.loc[train_nans.index, train_nans.columns] = numpy.nan
+    ynan_train[~ynan_train.index.isin(train_nans.index)].iloc[0] = numpy.nan
+    Xnan_predict = X_predict.copy()
+    test_nans = Xnan_predict.sample(frac=.2).sample(frac=.2,axis=1)
+    Xnan_predict.loc[test_nans.index, test_nans.columns] = numpy.nan
+
+
+    nantest = area_of_applicability(
+        X_test=Xnan_predict,
+        X_train=Xnan_train,
+        y_train=ynan_train,
+        model=model,
+        return_all=True
+    )
+
+    if not numpy.isnan(
+        nantest[0][X_predict.index.isin(test_nans.index)]
+    ).all():
+        raise ValueError("nan check failed, some nan values were dropped!")
     

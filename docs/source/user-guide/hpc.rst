@@ -130,7 +130,7 @@ The first part of the bash script declares the variables needed to execute the j
 Here, we include the time limit for the run (time), the number of nodes to use (nodes), the memory allocation (mem),
 the number of cpus per task (cpus-per-task), and the number of targets to be tuned (array).
 
-.. literalinclude:: ../../examples/tune_KNN.sh
+.. literalinclude:: ../../../examples/tune_KNN.sh
     :lines: 1-8
     :language: shell
 .. note::
@@ -142,21 +142,28 @@ Executable commands
 The next part of the bash script includes the commands to be executed.
 First, the array value is used to set a local variable that will be used to specify the target being tuned.
 
-.. literalinclude:: ../../examples/tune_KNN.sh
+.. literalinclude:: ../../../examples/tune_KNN.sh
     :lines: 10
+    :language: shell
+
+Next, a temporary folder to store multi-processing output is defined. 
+Note that this is highly cluster dependent and may not be required.
+
+.. literalinclude:: ../../../examples/tune_KNN.sh
+    :lines: 12-16
     :language: shell
 
 Next, the Apptainer module is loaded, and set up using the abil.sif container uploaded prior.
 
-.. literalinclude:: ../../examples/tune_KNN.sh
-    :lines: 12-16
+.. literalinclude:: ../../../examples/tune_KNN.sh
+    :lines: 18
     :language: shell
 
 Finally, the model Python script is executed using the specified number of cpus, for the target "i", within a specific model (knn in this instance).
 Lastly, the Singularity cache is exported.
 
-.. literalinclude:: ../../examples/tune_KNN.sh
-    :lines: 17-19
+.. literalinclude:: ../../../examples/tune_KNN.sh
+    :lines: 20-25
     :language: shell
 
 Alterations for predict and post
@@ -165,14 +172,14 @@ Alterations for predict and post
 The set up is the same for each the predict.sh and post.sh scripts, with the only change being the Python executable line.
 predict.sh should say the following:
 
-.. literalinclude:: ../../examples/predict.sh
-    :lines: 17
+.. literalinclude:: ../../../examples/predict.sh
+    :lines: 23
     :language: shell
 
 while post.sh should say the following, and does not include the array specification:
 
-.. literalinclude:: ../../examples/post.sh
-    :lines: 14
+.. literalinclude:: ../../../examples/post.sh
+    :lines: 20
     :language: shell
 
 Execute Abil on your HPC Machine
@@ -222,5 +229,5 @@ Singularity file
 ----------------
 Below is the Singularity.sif file text. This is used to create abil.sif in the steps above.
 
-.. literalinclude:: ../../examples/Singularity.sif
+.. literalinclude:: ../../../examples/Singularity.sif
     :language: Singularity

@@ -3,21 +3,14 @@ import numpy as np
 import pickle
 import os
 import time
-import warnings
+import logging
+logger = logging.getLogger("abil")
 
 from sklearn.ensemble import VotingRegressor, VotingClassifier
 from sklearn.model_selection import KFold, cross_validate
 from joblib import Parallel, delayed, parallel_backend  
 
 from .utils import inverse_weighting, find_optimal_threshold
-import shutil
-
-# Set the custom temporary folder for loky
-temp_folder = os.path.join(".","tmp") 
-os.environ["LOKY_TEMP_FOLDER"] = temp_folder
-# Ensure the directory exists
-os.makedirs(temp_folder, exist_ok=True)
-
 from . import unified_tree_or_bag as pp
 from .zir import ZeroInflatedRegressor
 from .zero_stratified_kfold import ZeroStratifiedKFold,  UpsampledZeroStratifiedKFold
@@ -55,7 +48,7 @@ def load_model_and_scores(path_out, ensemble_config, n, target):
         raise ValueError("classifiers are not supported")
 
     elif (ensemble_config["classifier"] ==False) and (ensemble_config["regressor"] == True):
-        print("predicting regressor")
+        logger.info("predicting regressor")
         target_no_space = target.replace(' ', '_')
         with open(os.path.join(path_to_param, target_no_space) + '_reg.sav', 'rb') as file:
             m = pickle.load(file)
@@ -65,7 +58,7 @@ def load_model_and_scores(path_out, ensemble_config, n, target):
 
 
     elif (ensemble_config["classifier"] ==True) and (ensemble_config["regressor"] == True):
-        print("predicting zero-inflated regressor")
+        logger.info("predicting zero-inflated regressor")
         target_no_space = target.replace(' ', '_')
         with open(os.path.join(path_to_param, target_no_space) + '_zir.sav', 'rb') as file:
             m = pickle.load(file)
@@ -79,7 +72,7 @@ def load_model_and_scores(path_out, ensemble_config, n, target):
     return(m, scores)
 
 
-def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_train, y_train, cv, model_out, n_threads=8):
+def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_train, y_train, cv, model_out, n_threads=8, random_state=None):
     """
     Exports model predictions to a NetCDF file.
 
@@ -104,19 +97,17 @@ def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_
     if (ensemble_config["classifier"] ==False) and (ensemble_config["regressor"] == True):
         with parallel_backend("loky", n_jobs=n_threads):
             d = pp.estimate_prediction_quantiles(
-                m, X_predict=X_predict, X_train=X_train, y_train=y_train, cv=cv
+                m, X_predict=X_predict, X_train=X_train, y_train=y_train, cv=cv, random_state=random_state
             )["predict_stats"]
             d['mean'] = m.predict(X_predict)
         
         d = d.to_xarray()
         d['target'] = target
         export_path = os.path.join(model_out, target_no_space + ".nc")
-        try: #make new dir if needed
-            os.makedirs(model_out)
-        except:
-            None
+        os.makedirs(model_out, exist_ok=True)
+
         d.to_netcdf(export_path) 
-        print("finished exporting summary stats to: ",  export_path)
+        logger.info(f"finished exporting summary stats to: {export_path}")
         
     elif (ensemble_config["classifier"] ==True) and (ensemble_config["regressor"] == True):
         y_clf = y_train.copy()
@@ -126,7 +117,7 @@ def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_
 
         with parallel_backend("loky", n_jobs=n_threads):
             d_both = pp.estimate_prediction_quantiles(
-                m, X_predict=X_predict, X_train=X_train, y_train=y_train, cv=cv, threshold=optimal_threshold
+                m, X_predict=X_predict, X_train=X_train, y_train=y_train, cv=cv, threshold=optimal_threshold, random_state=random_state
             )
             # Generate classifier and regressor stats
             d_clf = d_both['classifier_predict_stats']
@@ -154,27 +145,21 @@ def export_prediction(ensemble_config, m, target, target_no_space, X_predict, X_
         zir_export_path = os.path.join(model_out, target_no_space + ".nc")
 
         for dir_name in ["", "clf", "reg"]:
-            try:
-                os.makedirs(os.path.join(model_out, dir_name))
-            except FileExistsError:
-                pass
+            os.makedirs(os.path.join(model_out, dir_name), exist_ok=True)
 
         d_clf.to_netcdf(clf_export_path) 
-        print("finished exporting summary stats to: ",  clf_export_path)
+        logger.info(f"finished exporting summary stats to: {clf_export_path}")
         d_reg.to_netcdf(reg_export_path) 
-        print("finished exporting summary stats to: ",  reg_export_path)
+        logger.info(f"finished exporting summary stats to: {reg_export_path}")
         d.to_netcdf(zir_export_path) 
-        print("finished exporting summary stats to: ",  zir_export_path)
+        logger.info(f"finished exporting summary stats to: {zir_export_path}")
 
     else:
         raise ValueError("classifiers are not supported")
 
-    #remove loky tmp data:
-    shutil.rmtree(temp_folder, ignore_errors=True)
-
-class predict:
+class ModelPredictor:
     """
-    Predict outcomes using an ensemble of regression models and export the predictions to a NetCDF file.
+    Class to predict outcomes using an ensemble of regression models and export the predictions to a NetCDF file.
 
     Parameters
     ----------
@@ -268,12 +253,12 @@ class predict:
             
         if model_config['stratify']==True:
             if model_config['upsample']==True:
-                self.cv = UpsampledZeroStratifiedKFold(n_splits=model_config['cv'])
-                print("upsampling = True")
+                self.cv = UpsampledZeroStratifiedKFold(n_splits=model_config['cv'], random_state= model_config['seed'])
+                logger.info("upsampling = True")
             else:
-                self.cv = ZeroStratifiedKFold(n_splits=model_config['cv'])
+                self.cv = ZeroStratifiedKFold(n_splits=model_config['cv'], random_state= model_config['seed'])
         else:
-            self.cv = KFold(n_splits=model_config['cv'])
+            self.cv = KFold(n_splits=model_config['cv'], shuffle=True, random_state= model_config['seed'])
 
         self.X_predict = X_predict
         X_predict = None
@@ -305,7 +290,7 @@ class predict:
         else:
             self.extension = "_reg.sav"
 
-        print("initialized prediction")
+        logger.info("initialized prediction")
         
     def make_prediction(self):
         """
@@ -326,7 +311,7 @@ class predict:
         """
 
         number_of_models = len(self.ensemble_config) -2
-        print("number of models in ensemble:" + str(number_of_models))
+        logger.info(f"number of models in ensemble: {number_of_models}")
 
         if number_of_models==1:
 
@@ -335,7 +320,7 @@ class predict:
             model_name = self.ensemble_config["m" + str(1)]
             model_out = os.path.join(self.path_out, "predictions", model_name)
             export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                              model_out, n_threads=self.n_jobs)
+                              model_out, n_threads=self.n_jobs, random_state=self.seed)
 
         elif number_of_models >=2:
                     
@@ -351,11 +336,11 @@ class predict:
 
                 if (self.ensemble_config["classifier"] ==False) and (self.ensemble_config["regressor"] == True):
                     export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                                    model_out, n_threads=self.n_jobs)
+                                    model_out, n_threads=self.n_jobs, random_state=self.seed)
                 if (self.ensemble_config["classifier"] ==True) and (self.ensemble_config["regressor"] == True):
 
                     export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                                     model_out, n_threads=self.n_jobs)
+                                     model_out, n_threads=self.n_jobs, random_state=self.seed)
 
                 models.append((model_name, m))
                 mae_values.append(mae)
@@ -365,14 +350,13 @@ class predict:
                 m = VotingRegressor(estimators=models, weights=w).fit(self.X_train, self.y)   
                 model_out = os.path.join(self.path_out, "predictions", "ens")
                 export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                                model_out, n_threads=self.n_jobs)
+                                model_out, n_threads=self.n_jobs, random_state=self.seed)
                 
                 #export model object:
                 base_output_path = os.path.join(self.path_out, "model", "ens")
-                try: #make new dir if needed
-                    os.makedirs(base_output_path)
-                except:
-                    None
+                #make new dir if needed
+                os.makedirs(base_output_path, exist_ok=True)
+
 
                 file_path = os.path.join(base_output_path, f"{self.target_no_space}{self.extension}")
 
@@ -412,13 +396,11 @@ class predict:
                 m.fit(self.X_train, y)
                 model_out = os.path.join(self.path_out, "predictions", "ens")
                 export_prediction(self.ensemble_config, m, self.target, self.target_no_space, self.X_predict, self.X_train, self.y, self.cv, 
-                                model_out, n_threads=self.n_jobs)
+                                model_out, n_threads=self.n_jobs, random_state=self.seed)
                 base_output_path = os.path.join(self.path_out, "model", "ens")
 
-                try: #make new dir if needed
-                    os.makedirs(base_output_path)
-                except:
-                    None
+                #make new dir if needed
+                os.makedirs(base_output_path, exist_ok=True)
 
                 file_path = os.path.join(base_output_path, f"{self.target_no_space}{self.extension}")
 
@@ -433,10 +415,9 @@ class predict:
 
             model_out_scores = os.path.join(self.path_out, "scoring", "ens")
 
-            try: #make new dir if needed
-                os.makedirs(model_out_scores)
-            except:
-                None
+            #make new dir if needed
+            os.makedirs(model_out_scores, exist_ok=True)
+
 
             scores_file_path = os.path.join(model_out_scores, f"{self.target_no_space}{self.extension}")
 
@@ -448,5 +429,5 @@ class predict:
 
         et = time.time()
         elapsed_time = et-self.st
-        print("finished")
-        print("execution time:", elapsed_time, "seconds")
+        logger.info("finished")
+        logger.info(f"execution time: {elapsed_time} seconds")

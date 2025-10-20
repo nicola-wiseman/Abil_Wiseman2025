@@ -1,0 +1,13 @@
+Bootstrap: docker
+From: continuumio/miniconda3
+
+%post
+    . /opt/conda/etc/profile.d/conda.sh
+    apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+    conda install -y -c conda-forge python=3.11 pip
+    python -m pip install --upgrade pip
+    pip install abil
+
+%runscript
+    . /opt/conda/etc/profile.d/conda.sh
+    exec "$@"

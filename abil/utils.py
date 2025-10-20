@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import xarray as xr
+import logging
+logger = logging.getLogger("abil")
 
 from sklearn.datasets import make_regression
 from sklearn.utils import resample
@@ -13,6 +15,7 @@ from sklearn.exceptions import NotFittedError
 from xgboost import XGBClassifier, XGBRegressor, DMatrix
 from sklearn.pipeline import Pipeline
 from sklearn.compose import TransformedTargetRegressor
+from sklearn.base import _is_fitted
 
 def do_nothing(x):
     """
@@ -81,16 +84,12 @@ def xgboost_get_n_estimators(model):
 
     # If no `n_estimators` is found, raise an error or return a default value
     raise ValueError("Could not extract `n_estimators` from the model.")
-from sklearn.pipeline import Pipeline
-from sklearn.compose import TransformedTargetRegressor
-from xgboost import XGBClassifier, XGBRegressor
-from sklearn.exceptions import NotFittedError
-from sklearn.base import _is_fitted
 
 def _predict_one_member(i, member, chunk, proba=False, threshold=0.5):
     """
     """
-    with warnings.catch_warnings(action='ignore', category=UserWarning):
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning)
         if proba:
             if isinstance(member, Booster):
                 # For XGBoost Booster, use predict() to get probabilities
@@ -188,18 +187,18 @@ def merge_obs_env(obs_path="../data/gridded_abundances.csv",
     d.rename({'Latitude': 'lat', 'Longitude': 'lon', 'Depth': 'depth', 'Month': 'time'}, inplace=True, axis=1)
     d.set_index(['lat', 'lon', 'depth', 'time'], inplace=True)
 
-    print("loading env")
+    logger.info("loading env")
     ds = xr.open_dataset(env_path)
-    print("converting to dataframe")
+    logger.info("converting to dataframe")
     df = ds.to_dataframe()
     ds = None
     df.reset_index(inplace=True)
     df = df[env_vars]
     df.set_index(['lat', 'lon', 'depth', 'time'], inplace=True)
-    print("merging environment")
+    logger.info("merging environment")
     out = d.merge(df, how="left", left_index=True, right_index=True)
     out.to_csv(out_path, index=True)
-    print("fin")
+    logger.info("fin")
 
 def example_data(
     y_name, 
@@ -413,7 +412,8 @@ def weighted_quantile(x, weights, q=.5):
     # at or below that row divided by the total weight. 
     observed_quantiles = (weight_sums/total_weight)
     if isinstance(q, float):
-        assert (0 <= q) & (q <= 1), "quantile must be between zero and one"
+        if not ((0 <= q) & (q <= 1)):
+            raise ValueError("quantile must be between zero and one")
         # Give me all rows in the data where the fraction of weight
         # smaller than that row is at least the quantile we're looking for. 
         at_or_above_q = df.data[observed_quantiles >= q]
@@ -422,7 +422,8 @@ def weighted_quantile(x, weights, q=.5):
     else:
         result = []
         for q_ in q:
-            assert (0 <= q_) & (q_ <= 1), "all quantiles must be between zero and one"
+            if not ((0 <= q_) & (q_ <= 1)):
+                raise ValueError("all quantiles must be between zero and one")
             at_or_above_q = df.data[observed_quantiles >= q_]
             result.append(at_or_above_q.iloc[0])
     return result

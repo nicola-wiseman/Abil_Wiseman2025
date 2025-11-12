@@ -49,9 +49,13 @@ for i, file in enumerate(files):
     
     # Add time and depth dimensions in one step
     dr_out = dr_out.assign_coords(time=i+1).expand_dims(time=[i+1])
+    dr_out_depth = dr_out.expand_dims(depth=[0, 205])
+    
+    # Interpolate along the depth axis from 0 to 305 meters at 5m intervals
+    dr_out_depth = dr_out_depth.interp(depth=np.arange(0, 205, 5))
     
     # Append the dataset to the list
-    ds_all.append(dr_out)
+    ds_all.append(dr_out_depth)
 
 # Concatenate all datasets along the time dimension
 ds = xr.concat(ds_all, dim="time")

@@ -12,6 +12,6 @@ module  load apptainer/1.3.1
 singularity exec \
 -B/user/work/$(whoami):/user/work/$(whoami) \
 /user/work/$(whoami)/Abil/studies/wiseman2024/singularity/abil.sif \
-python /user/work/$(whoami)/Abil/studies/wiseman2024/pre.py 
+python /user/work/$(whoami)/Abil/studies/wiseman2024/pre_both.py 
 
 export SINGULARITY_CACHEDIR=/user/work/$(whoami)/.singularity

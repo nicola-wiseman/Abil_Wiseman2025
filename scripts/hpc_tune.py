@@ -38,4 +38,4 @@ X_train = d[predictors]
 m = ModelTuner(X_train, y, model_config)
 
 #run model:
-m.train(model=model, regressor=True)
+m.train(model=model, regressor=True, log='both')

@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import xarray as xr
 from scipy.stats import truncnorm
+from abil.pseudo_generation import generate_pseudo_absences
 
 
 def process_variable(varname):
@@ -15,7 +16,7 @@ def process_variable(varname):
 
     # Load dataset
     d_raw = pd.read_csv(
-        '/home/mv23682/Documents/Abil_Wiseman2025/scripts/data/Marsh_et_al_2025_Database_V_1.0.csv',
+        '/user/work/mv23682/Abil/studies/wiseman2024/data/Marsh_et_al_2025_Database_V_1.0.csv',
         skiprows=1,
         names=[
             "PI","Expedition","OS Region","Reference_Author_Published_year","Reference_doi",
@@ -47,6 +48,10 @@ def process_variable(varname):
         mask = denom.notna() & (d[varname] / denom > 3.5)
         d = d[~mask]
         print(f"Rows after high calcification/Emiliania filter: {len(d)}")
+
+    if varname == "Primary_Production":
+        d['Primary_Production'] = d['Primary_Production'] * 1e-3
+        print(f"Primary_Production converted to mmol/m3/d")
 
     # Drop unused columns — keep varname + its SD
     keep = [
@@ -126,31 +131,35 @@ def process_variable(varname):
     print(f"Rows after dropping samples without complete environmental data: {len(d)}")
 
     # Load mask and convert to DataFrame of zeros
-    mask_ds = xr.open_dataset('/user/work/mv23682/Abil/studies/wiseman2024/data/PAR_01prct_mask.nc')
-    mask = mask_ds["mask"]
-    zeros_df = mask.where(mask == 0, drop=True).to_dataframe().reset_index()
-    zeros_df = zeros_df[zeros_df["mask"] == 0].set_index(["lat","lon","depth","time"])
+    # mask_ds = xr.open_dataset('/user/work/mv23682/Abil/studies/wiseman2024/data/PAR_1prct_mask.nc')
+    # mask = mask_ds["mask"]
+    # zeros_df = mask.where(mask == 0, drop=True).to_dataframe().reset_index()
+    # zeros_df = zeros_df[zeros_df["mask"] == 0].set_index(["lat","lon","depth","time"])
 
     # Keep only positions that exist in env data
-    zeros_df = zeros_df.loc[zeros_df.index.intersection(valid_env_idx)]
-    print(f"Zeros rows after intersection with env: {len(zeros_df)}")
+    # zeros_df = zeros_df.loc[zeros_df.index.intersection(valid_env_idx)]
+    # print(f"Zeros rows after intersection with env: {len(zeros_df)}")
 
     # Sample zeros
-    n_obs = d[varname].notna().sum()
-    zeros_subset = zeros_df.sample(n=n_obs, random_state=42)
-    zs = zeros_subset.copy()
-    zs[varname] = 0
-    for c in sample_cols:
-        zs[c] = 0
-    zs.drop(columns=["mask"],inplace=True)
+    # n_obs = d[varname].notna().sum()
+    # zeros_subset = zeros_df.sample(n=n_obs, random_state=42)
+    # zs = zeros_subset.copy()
+    # zs[varname] = 0
+    # for c in sample_cols:
+    #     zs[c] = 0
+    # zs.drop(columns=["mask"],inplace=True)
 
     # Concatenate original data and zeros
-    d = pd.concat([d, zs], ignore_index=False)
-    print(f"Rows after adding pseudo-zeros: {len(d)}")
+    # d = pd.concat([d, zs], ignore_index=False)
 
-    # Merge with environment data
+    # Use AOA to generate pseudo-zeros
+    missing_df_env = df_env[~df_env.index.isin(d.index)]
     d = d.join(df_env, how="inner").reset_index()
+    d = d.set_index(["lat", "lon", "depth", "time"])
     print(f"Rows after merging with environment: {len(d)}")
+
+    d = generate_pseudo_absences(d, missing_df_env, env_cols, ["Primary_Production"])
+    print(f"Rows after adding pseudo-zeros: {len(d)}")
 
     return d.reset_index(drop=True)
 
@@ -159,7 +168,7 @@ def process_variable(varname):
 pp_df   = process_variable("Primary_Production")
 
 # Save combined CSV
-outfile = "/user/work/mv23682/Abil/studies/wiseman2024/data/pp_env_presample.csv"
+outfile = "/user/work/mv23682/Abil/studies/wiseman2024/data/pp_env_aoa_pseudo.csv"
 pp_df.to_csv(outfile, index=False)
 
 print("\n=== Finished ===")
